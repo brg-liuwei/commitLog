@@ -3,7 +3,6 @@ package commitService
 import (
 	"commiter"
 	"errors"
-	"fmt"
 	"global"
 	"inputer"
 	"outputer"
@@ -79,7 +78,7 @@ func (s *CommitService) Serve() (err error) {
 
 		/* Get Msg by Id??? */
 		case msgId := <-outputChan:
-			fmt.Println("get msg id: ", msgId)
+			_ = msgId
 			msg, err = s.commitHandler.Consume()
 			if err != nil {
 				global.Log(err)
