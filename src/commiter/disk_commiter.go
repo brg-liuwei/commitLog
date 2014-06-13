@@ -4,8 +4,11 @@ import (
 	"encoding/binary"
 	"errors"
 	"global"
+	"io"
 	"message"
 	"os"
+	"path"
+	"path/filepath"
 	"strconv"
 	"sync"
 )
@@ -77,8 +80,7 @@ func NewDiskCommiter(path string) *DiskCommiter {
 	if err != nil {
 		goto error4
 	}
-	//d.mask = 0xFFFFFFFF
-	d.mask = 0xFF
+	d.mask = 0xFFFFFFFF
 	return d
 
 error4:
@@ -92,9 +94,122 @@ error1:
 	panic(err)
 }
 
-func RecoverDiskCommiter(path string) *DiskCommiter {
-	// TODO impl this func
-	return nil
+func RecoverDiskCommiter(dataPath string) *DiskCommiter {
+	if dataPath[len(dataPath)-1] != '/' {
+		dataPath += "/"
+	}
+	max := -1
+	var conFile string
+	var conId int
+	filepath.Walk(dataPath, func(path_ string, info os.FileInfo, err error) error {
+		var num, idx int
+		if err != nil {
+			panic(err)
+		}
+		/* 获取扩展名 */
+		ext := path.Ext(path_)
+		var name string
+		switch ext {
+		case ".off":
+			_, name = path.Split(path_)
+			idx = len(name) - 4 /* xxx.off */
+			num, err = strconv.Atoi(name[:idx])
+			if err != nil {
+				panic(err)
+			}
+			if num > max {
+				max = num
+			}
+		case ".con":
+			conFile = path_
+			_, name = path.Split(path_)
+			idx = len(name) - 4 /* xxx.con */
+			conId, err = strconv.Atoi(name[:idx])
+			if err != nil {
+				panic(err)
+			}
+		}
+		return nil
+	})
+	maxOffFile := dataPath + strconv.Itoa(max) + ".off"
+	maxDatFile := dataPath + strconv.Itoa(max) + ".dat"
+
+	d := new(DiskCommiter)
+	d.path = dataPath
+	d.mask = 0xFFFFFFFF
+	d.wFileId = uint64(max)
+	d.rFileId = uint64(conId)
+	wFlag := os.O_APPEND | os.O_WRONLY
+	rFlag := os.O_RDONLY
+
+	var off int64
+	var err error
+
+	/* Append DataFile */
+	d.wDatFile, err = os.OpenFile(maxDatFile, wFlag, 0666)
+	if err != nil {
+		panic(err)
+	}
+
+	/* Append OffFile, calc max msg Id */
+	d.wOffFile, err = os.OpenFile(maxOffFile, wFlag, 0666)
+	if err != nil {
+		panic(err)
+	}
+	off, err = d.wOffFile.Seek(0, os.SEEK_END)
+	if err != nil {
+		panic(err)
+	}
+	d.maxId = ((d.mask + 1) * uint64(max)) + (uint64(off) >> 3)
+
+	/* Append ConFile, calc current msg Id */
+	d.wConFile, err = os.OpenFile(conFile, wFlag, 0666)
+	if err != nil {
+		panic(err)
+	}
+	off, err = d.wConFile.Seek(0, os.SEEK_END)
+	if err != nil {
+		panic(err)
+	}
+	d.curId = ((d.mask + 1) * uint64(conId)) + (uint64(off) >> 3)
+
+	/* Open rDatFile and Seek to cur read pos */
+	rDatFileName := dataPath + strconv.Itoa(conId) + ".dat"
+	rOffFileName := dataPath + strconv.Itoa(conId) + ".off"
+
+	d.rDatFile, err = os.OpenFile(rDatFileName, rFlag, 0666)
+	if err != nil {
+		panic(err)
+	}
+
+	var rOffFile *os.File
+	rOffFile, err = os.OpenFile(rOffFileName, rFlag, 0666)
+	if err != nil {
+		panic(err)
+	}
+	defer rOffFile.Close()
+
+	_, err = rOffFile.Seek(8*int64(d.curId&d.mask), os.SEEK_SET)
+	if err != nil {
+		panic(err)
+	}
+	err = binary.Read(rOffFile, binary.LittleEndian, &off)
+	if err != nil {
+		if d.curId == d.maxId && err == io.EOF {
+			// 当前所有消息已被消费完
+			_, err = d.rDatFile.Seek(0, os.SEEK_END)
+		}
+		if err != nil {
+			panic(err)
+		}
+	} else {
+		_, err = d.rDatFile.Seek(off, os.SEEK_SET)
+		if err != nil {
+			panic(err)
+		}
+	}
+
+	return d
 }
 
 func (d *DiskCommiter) Total() uint64 {

@@ -11,22 +11,23 @@ import (
 
 func main() {
 
-	if len(os.Args) != 2 {
-		println("Usage: ", os.Args[0], " <path>")
+	if len(os.Args) < 2 {
+		println("Usage: ", os.Args[0], " <path> [r]")
 		return
 	}
-	//global.Init("debug.log")
-	global.InitStdLog()
-
-	//inputImpl := inputer.NewStdInputService()
-	//outputImpl := outputer.NewStdOutputService()
-	//commitImpl := commiter.NewMemoryCommiter()
+	global.Init("debug.log")
+	//global.InitStdLog()
 
 	inputImpl := inputer.NewZmqInputService("tcp://localhost:9998")
 	outputImpl := outputer.NewRpcOutputService()
 	outputImpl.SetRpcAddr(":9999")
-	//commitImpl := commiter.NewMemoryCommiter()
-	commitImpl := commiter.NewDiskCommiter(os.Args[1])
+
+	var commitImpl commiter.Commiter
+	if len(os.Args) == 3 && os.Args[2] == "r" {
+		commitImpl = commiter.RecoverDiskCommiter(os.Args[1])
+	} else {
+		commitImpl = commiter.NewDiskCommiter(os.Args[1])
+	}
 
 	server := commitService.NewCommitService()
 	server.SetInputer(inputImpl)

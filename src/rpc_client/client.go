@@ -30,9 +30,13 @@ func main() {
 	}
 	defer cli.Close()
 
-	for err == nil {
+	//for err == nil {
+	for i := 0; i != 1000; i++ {
 		var msg message.Msg
 		err = cli.Call("RpcHandler.GetRemoteMsg", 0, &msg)
+		if err != nil {
+			break
+		}
 		fmt.Println("MessageId: ", msg.MsgId)
 		fmt.Println("MessageContent: ", msg.Content)
 	}
